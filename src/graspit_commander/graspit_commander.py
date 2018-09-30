@@ -1,8 +1,14 @@
+import os
+import time
+
 import rospy
 import actionlib
 from rospy.exceptions import ROSException
 import geometry_msgs
+import numpy as np
+import cv2
 
+from config import d
 from graspit_interface.msg import (
     Body,
     Energy,
@@ -39,10 +45,11 @@ from graspit_interface.srv import (
     DynamicAutoGraspComplete,
     ImportObstacle,
     FindInitialContact,
-    ImportGraspableBody, 
+    ImportGraspableBody,
     ImportObstacle,
     ImportRobot,
     SaveImage,
+    GetImage,
     SaveWorld,
     ToggleAllCollisions,
     ForceRobotDOF,
@@ -82,6 +89,7 @@ def _wait_for_service(serviceName, timeout=1):
     except ROSException, e:
         raise GraspitTimeoutException(serviceName)
 
+
 def _wait_for_action_server(client, timeout=1):
     try:
         client.wait_for_server(timeout=rospy.Duration(timeout))
@@ -89,7 +97,21 @@ def _wait_for_action_server(client, timeout=1):
         raise GraspitTimeoutException()
 
 
-class GraspitCommander(object): 
+def convertQImageToMat(incomingImage):
+    '''  Converts a QImage into an opencv MAT format  '''
+
+    incomingImage = incomingImage.convertToFormat(4)
+
+    width = incomingImage.width()
+    height = incomingImage.height()
+
+    ptr = incomingImage.bits()
+    ptr.setsize(incomingImage.byteCount())
+    arr = np.array(ptr).reshape(height, width, 4)  # Copies the data
+    return arr
+
+
+class GraspitCommander(object):
     """
     Python interface for interacting with GraspIt
     """
@@ -159,7 +181,8 @@ class GraspitCommander(object):
     def setGraspableBodyPose(id, pose):
         _wait_for_service(GraspitCommander.GRASPIT_NODE_NAME + 'setGraspableBodyPose')
 
-        serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'setGraspableBodyPose', SetGraspableBodyPose)
+        serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'setGraspableBodyPose',
+                                          SetGraspableBodyPose)
         result = serviceProxy(id, pose)
 
         if result.result is SetGraspableBodyPose._response_class.RESULT_SUCCESS:
@@ -216,7 +239,6 @@ class GraspitCommander(object):
         result = serviceProxy()
 
         return result.dynamicsEnabled
-
 
     @staticmethod
     def setDynamics(enabled):
@@ -416,7 +438,8 @@ class GraspitCommander(object):
     def dynamicAutoGraspComplete(id=0):
         _wait_for_service(GraspitCommander.GRASPIT_NODE_NAME + 'dynamicAutoGraspComplete')
 
-        serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'dynamicAutoGraspComplete', DynamicAutoGraspComplete)
+        serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'dynamicAutoGraspComplete',
+                                          DynamicAutoGraspComplete)
         result = serviceProxy(id)
 
         if result.result is DynamicAutoGraspComplete._response_class.RESULT_SUCCESS:
@@ -448,7 +471,8 @@ class GraspitCommander(object):
             pose = geometry_msgs.msg.Pose()
             pose.orientation.w = 1
 
-        serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'importGraspableBody', ImportGraspableBody)
+        serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'importGraspableBody',
+                                          ImportGraspableBody)
         result = serviceProxy(bodyName, pose)
 
         if result.result is ImportGraspableBody._response_class.RESULT_SUCCESS:
@@ -477,10 +501,39 @@ class GraspitCommander(object):
         _wait_for_service(GraspitCommander.GRASPIT_NODE_NAME + 'saveImage')
 
         serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'saveImage', SaveImage)
-        result = serviceProxy(fileName)
+        result = serviceProxy(fileName[:-4], 0, 0, d.depth)
 
         if result.result is SaveImage._response_class.RESULT_SUCCESS:
             return
+        elif result.result is SaveImage._response_class.RESULT_FAILURE:
+            raise SaveImageException()
+
+    @staticmethod
+    def getImage(shape):
+        _wait_for_service(GraspitCommander.GRASPIT_NODE_NAME + 'getImage')
+
+        serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'getImage', GetImage)
+        result = serviceProxy(shape[0], shape[1])
+        r = np.array(result.r).reshape(shape)
+        g = np.array(result.g).reshape(shape)
+        b = np.array(result.b).reshape(shape)
+        image = np.stack((r, g, b), axis=2)
+        return image
+
+    @staticmethod
+    def getImageDisk(shape):
+        _wait_for_service(GraspitCommander.GRASPIT_NODE_NAME + 'saveImage')
+
+        serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'saveImage', SaveImage)
+        result = serviceProxy(os.path.basename(d.tmp_dir[:-4]), shape[0], shape[1], d.depth, d.depth_scale,
+                              d.depth_bias)
+
+        if result.result is SaveImage._response_class.RESULT_SUCCESS:
+            rgb = cv2.imread(d.tmp_dir)
+            depth = cv2.imread(d.tmp_depth_dir)[:, :, 0:1]
+            rgbd = np.concatenate((rgb, depth), axis=2)
+            assert rgbd.shape == (shape[0], shape[1], 3 + int(d.depth)), rgbd.shape
+            return rgbd
         elif result.result is SaveImage._response_class.RESULT_FAILURE:
             raise SaveImageException()
 
@@ -500,5 +553,6 @@ class GraspitCommander(object):
     def toggleAllCollisions(enableCollisions):
         _wait_for_service(GraspitCommander.GRASPIT_NODE_NAME + 'toggleAllCollisions')
 
-        serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'toggleAllCollisions', ToggleAllCollisions)
+        serviceProxy = rospy.ServiceProxy(GraspitCommander.GRASPIT_NODE_NAME + 'toggleAllCollisions',
+                                          ToggleAllCollisions)
         serviceProxy(enableCollisions)
