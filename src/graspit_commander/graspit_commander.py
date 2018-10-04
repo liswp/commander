@@ -531,6 +531,7 @@ class GraspitCommander(object):
         if result.result is SaveImage._response_class.RESULT_SUCCESS:
             rgb = cv2.imread(d.tmp_dir)
             depth = cv2.imread(d.tmp_depth_dir)[:, :, 0:1]
+            rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
             rgbd = np.concatenate((rgb, depth), axis=2)
             assert rgbd.shape == (shape[0], shape[1], 3 + int(d.depth)), rgbd.shape
             return rgbd
