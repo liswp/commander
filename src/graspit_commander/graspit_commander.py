@@ -97,6 +97,7 @@ def _wait_for_action_server(client, timeout=1):
         raise GraspitTimeoutException()
 
 
+
 def convertQImageToMat(incomingImage):
     '''  Converts a QImage into an opencv MAT format  '''
 
