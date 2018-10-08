@@ -520,6 +520,7 @@ class GraspitCommander(object):
         image = np.stack((r, g, b), axis=2)
         return image
 
+
     @staticmethod
     def getImageDisk(shape):
         _wait_for_service(GraspitCommander.GRASPIT_NODE_NAME + 'saveImage')
